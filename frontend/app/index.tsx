@@ -421,6 +421,14 @@ const styles = StyleSheet.create({
   secondaryButton: {
     paddingVertical: 12,
     alignItems: 'center',
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      display: 'flex',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+      border: 'none',
+      fontFamily: 'inherit',
+    }),
   },
   secondaryButtonText: {
     color: '#2563eb',
