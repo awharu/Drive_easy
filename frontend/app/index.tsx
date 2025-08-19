@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || '';
+const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://8937bc15-4812-4395-a44d-5df249206f55.preview.emergentagent.com';
 
 interface User {
   id: string;
