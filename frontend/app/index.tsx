@@ -281,30 +281,27 @@ export default function LoginScreen() {
               />
             </View>
 
-            <TouchableOpacity
+            <CustomButton
               style={[styles.primaryButton, loading && styles.buttonDisabled]}
               onPress={isLogin ? handleLogin : handleRegister}
               disabled={loading}
-              accessible={true}
-              accessibilityRole="button"
               accessibilityLabel={isLogin ? 'Sign In' : 'Sign Up'}
+              textStyle={styles.primaryButtonText}
             >
-              <Text style={styles.primaryButtonText}>
-                {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Sign Up')}
-              </Text>
-            </TouchableOpacity>
+              {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Sign Up')}
+            </CustomButton>
 
-            <TouchableOpacity
+            <CustomButton
               style={styles.secondaryButton}
               onPress={() => setIsLogin(!isLogin)}
+              textStyle={styles.secondaryButtonText}
+              accessibilityLabel="Switch between sign in and sign up"
             >
-              <Text style={styles.secondaryButtonText}>
-                {isLogin 
-                  ? "Don't have an account? Sign Up" 
-                  : "Already have an account? Sign In"
-                }
-              </Text>
-            </TouchableOpacity>
+              {isLogin 
+                ? "Don't have an account? Sign Up" 
+                : "Already have an account? Sign In"
+              }
+            </CustomButton>
 
             {/* Demo accounts info */}
             <View style={styles.demoInfo}>
