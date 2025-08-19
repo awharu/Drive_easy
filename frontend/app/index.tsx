@@ -61,11 +61,14 @@ export default function LoginScreen() {
   };
 
   const handleLogin = async () => {
+    console.log('Login button clicked'); // Debug log
+    
     if (!email || !password) {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
+    console.log('Making login request to:', `${API_BASE_URL}/api/auth/login`); // Debug log
     setLoading(true);
 
     try {
@@ -77,17 +80,22 @@ export default function LoginScreen() {
         body: JSON.stringify({ email, password }),
       });
 
+      console.log('Login response status:', response.status); // Debug log
       const data = await response.json();
+      console.log('Login response data:', data); // Debug log
 
       if (response.ok) {
         await AsyncStorage.setItem('authToken', data.token);
         await AsyncStorage.setItem('user', JSON.stringify(data.user));
         
+        console.log('Login successful, navigating to app'); // Debug log
         navigateToApp(data.user);
       } else {
+        console.log('Login failed:', data); // Debug log
         Alert.alert('Login Failed', data.detail || 'Invalid credentials');
       }
     } catch (error) {
+      console.error('Login error:', error); // Debug log
       Alert.alert('Error', 'Network error. Please try again.');
     } finally {
       setLoading(false);
