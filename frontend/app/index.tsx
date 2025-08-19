@@ -17,6 +17,40 @@ import { Ionicons } from '@expo/vector-icons';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://8937bc15-4812-4395-a44d-5df249206f55.preview.emergentagent.com';
 
+// Custom Button component that works on web
+const CustomButton = ({ onPress, disabled, style, textStyle, children, accessibilityLabel }) => {
+  if (Platform.OS === 'web') {
+    return (
+      <button
+        onClick={onPress}
+        disabled={disabled}
+        style={{
+          ...style,
+          border: 'none',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+        }}
+        aria-label={accessibilityLabel}
+      >
+        <span style={textStyle}>{children}</span>
+      </button>
+    );
+  }
+  
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled}
+      style={style}
+      accessible={true}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+    >
+      <Text style={textStyle}>{children}</Text>
+    </TouchableOpacity>
+  );
+};
+
 interface User {
   id: string;
   email: string;
