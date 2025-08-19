@@ -403,6 +403,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     marginBottom: 16,
+    // Web-specific styles
+    ...(Platform.OS === 'web' && {
+      display: 'flex',
+      justifyContent: 'center',
+      fontFamily: 'inherit',
+    }),
   },
   primaryButtonText: {
     color: '#fff',
