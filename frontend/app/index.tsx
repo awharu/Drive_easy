@@ -251,6 +251,9 @@ export default function LoginScreen() {
               style={[styles.primaryButton, loading && styles.buttonDisabled]}
               onPress={isLogin ? handleLogin : handleRegister}
               disabled={loading}
+              accessible={true}
+              accessibilityRole="button"
+              accessibilityLabel={isLogin ? 'Sign In' : 'Sign Up'}
             >
               <Text style={styles.primaryButtonText}>
                 {loading ? 'Please wait...' : (isLogin ? 'Sign In' : 'Sign Up')}
