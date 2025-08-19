@@ -264,8 +264,8 @@ export default function LoginScreen() {
             {/* Demo accounts info */}
             <View style={styles.demoInfo}>
               <Text style={styles.demoTitle}>Demo Accounts</Text>
-              <Text style={styles.demoText}>Admin: admin@demo.com / admin123</Text>
-              <Text style={styles.demoText}>Driver: driver@demo.com / driver123</Text>
+              <Text style={styles.demoText}>Admin: admin@deliveryapp.com / admin123</Text>
+              <Text style={styles.demoText}>Driver: driver@deliveryapp.com / driver123</Text>
             </View>
           </View>
         </ScrollView>
