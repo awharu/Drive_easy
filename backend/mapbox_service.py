@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 import redis
-from mapbox import Directions, Geocoding
+from mapbox import Directions, Geocoder
 import requests
 from geojson import Point, Feature, LineString
 import math
@@ -26,7 +26,7 @@ if not MAPBOX_ACCESS_TOKEN:
 
 # Initialize Mapbox clients
 directions_client = Directions(access_token=MAPBOX_ACCESS_TOKEN)
-geocoding_client = Geocoding(access_token=MAPBOX_ACCESS_TOKEN)
+geocoder_client = Geocoder(access_token=MAPBOX_ACCESS_TOKEN)
 
 # Redis client for caching
 try:
@@ -83,7 +83,7 @@ class NavigationProgress(BaseModel):
 class MapboxService:
     def __init__(self):
         self.directions = directions_client
-        self.geocoding = geocoding_client
+        self.geocoder = geocoder_client
         self.redis = redis_client
         
     async def calculate_route(self, route_request: RouteRequest) -> RouteResponse:
@@ -198,7 +198,7 @@ class MapboxService:
     async def geocode_address(self, address: str) -> Optional[Coordinate]:
         """Convert address to coordinates using Mapbox Geocoding API"""
         try:
-            response = self.geocoding.forward(address, limit=1)
+            response = self.geocoder.forward(address, limit=1)
             
             if response.status_code == 200:
                 data = response.json()
@@ -216,7 +216,7 @@ class MapboxService:
     async def reverse_geocode(self, coordinate: Coordinate) -> Optional[str]:
         """Convert coordinates to address using Mapbox Reverse Geocoding API"""
         try:
-            response = self.geocoding.reverse(
+            response = self.geocoder.reverse(
                 lon=coordinate.longitude,
                 lat=coordinate.latitude,
                 limit=1
