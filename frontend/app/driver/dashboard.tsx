@@ -70,10 +70,10 @@ const DriverDashboard: React.FC = () => {
   const cameraRef = useRef<any>(null);
   const locationSubscription = useRef<any>(null);
 
-  // Initialize component
+  // Initialize component with progressive loading
   useEffect(() => {
+    // Start with auth check only
     checkAuthAndLoad();
-    requestLocationPermissions();
     
     return () => {
       stopLocationTracking();
