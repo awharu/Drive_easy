@@ -142,21 +142,41 @@ const DriverDashboard: React.FC = () => {
         return;
       }
 
-      // Get initial location
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      // Get initial location with timeout to prevent hanging
+      try {
+        const location = await Promise.race([
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced, // Use balanced instead of high for faster response
+          }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Location timeout')), 10000)
+          )
+        ]);
 
-      setUserLocation({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        heading: location.coords.heading || 0,
-        speed: location.coords.speed || 0,
-        accuracy: location.coords.accuracy || 0,
-      });
+        setUserLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          heading: location.coords.heading || 0,
+          speed: location.coords.speed || 0,
+          accuracy: location.coords.accuracy || 0,
+        });
 
-      // Start location tracking
-      startLocationTracking();
+        // Start location tracking after getting initial location
+        setTimeout(() => {
+          startLocationTracking();
+        }, 1000);
+        
+      } catch (locationError) {
+        console.error('Initial location error:', locationError);
+        // Set default location (San Francisco) if location fails
+        setUserLocation({
+          latitude: 37.7749,
+          longitude: -122.4194,
+          heading: 0,
+          speed: 0,
+          accuracy: 0,
+        });
+      }
     } catch (error) {
       console.error('Location permission error:', error);
     }
