@@ -283,7 +283,7 @@ class DeliveryDispatchTester:
                     data = await response.json()
                     if 'drivers' in data and isinstance(data['drivers'], list) and len(data['drivers']) > 0:
                         # Should find our registered driver
-                        driver_found = any(driver['email'] == 'driver@deliveryapp.com' for driver in data['drivers'])
+                        driver_found = any(driver['email'] == self.driver_user['email'] for driver in data['drivers'])
                         if driver_found:
                             self.log_result("Driver Listing", True, f"Found {len(data['drivers'])} drivers")
                             return True
