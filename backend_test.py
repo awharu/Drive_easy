@@ -84,9 +84,12 @@ class DeliveryDispatchTester:
 
     async def test_user_registration(self):
         """Test user registration for both admin and driver"""
+        # Use unique emails with timestamp to avoid conflicts
+        timestamp = str(int(datetime.now().timestamp()))
+        
         # Test admin registration
         admin_data = {
-            "email": "admin@deliveryapp.com",
+            "email": f"admin_{timestamp}@deliveryapp.com",
             "name": "Admin User",
             "phone": "+1234567890",
             "role": "admin",
@@ -114,7 +117,7 @@ class DeliveryDispatchTester:
 
         # Test driver registration
         driver_data = {
-            "email": "driver@deliveryapp.com",
+            "email": f"driver_{timestamp}@deliveryapp.com",
             "name": "Driver User",
             "phone": "+1234567891",
             "role": "driver",
