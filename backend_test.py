@@ -805,34 +805,57 @@ class DeliveryDispatchTester:
             return False
 
     async def run_all_tests(self):
-        """Run all backend tests"""
-        print("🚀 Starting Delivery Dispatch Backend Tests")
-        print("=" * 60)
+        """Run all backend tests including Mapbox integration"""
+        print("🚀 Starting Delivery Dispatch Backend Tests with Mapbox Integration")
+        print("=" * 70)
         
         await self.setup_session()
         
         try:
-            # Test sequence
+            # Core functionality tests
             await self.test_health_check()
             await self.test_user_registration()
             await self.test_user_login()
+            
+            # Mapbox route and geocoding tests
+            print("\n🗺️  Testing Mapbox Integration...")
+            await self.test_route_calculation()
+            await self.test_route_optimization()
+            await self.test_geocoding()
+            await self.test_reverse_geocoding()
+            
+            # Enhanced delivery management with Mapbox
+            print("\n📦 Testing Enhanced Delivery Management...")
             await self.test_delivery_creation()
             await self.test_delivery_listing()
             await self.test_driver_listing()
             await self.test_delivery_assignment()
             await self.test_delivery_status_updates()
-            await self.test_location_updates()
+            
+            # Navigation and tracking tests
+            print("\n🧭 Testing Navigation & Tracking...")
+            await self.test_navigation_start()
+            await self.test_navigation_progress()
+            await self.test_driver_location_retrieval()
+            await self.test_tracking_link_creation()
             await self.test_public_tracking()
+            await self.test_delivery_completion()
+            
+            # Real-time communication tests
+            print("\n🔄 Testing Real-time Communication...")
             await self.test_websocket_connections()
+            
+            # Error handling tests
+            print("\n⚠️  Testing Error Handling...")
             await self.test_error_handling()
             
         finally:
             await self.cleanup_session()
         
         # Print summary
-        print("\n" + "=" * 60)
+        print("\n" + "=" * 70)
         print("🏁 Test Summary")
-        print("=" * 60)
+        print("=" * 70)
         print(f"✅ Passed: {self.results['passed']}")
         print(f"❌ Failed: {self.results['failed']}")
         
