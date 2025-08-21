@@ -14,6 +14,10 @@ from mapbox import Directions, Geocoder
 import requests
 from geojson import Point, Feature, LineString
 import math
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('/app/backend/.env')
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
