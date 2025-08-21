@@ -1,204 +1,207 @@
-from fastapi import FastAPI, APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, status
+import os
+import uuid
+import json
+import secrets
+import hashlib
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Any
+import asyncio
+import logging
+
+from fastapi import FastAPI, HTTPException, Depends, WebSocket, WebSocketDisconnect, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, EmailStr
 from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
-import os
-import logging
-from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
-import uuid
-from datetime import datetime, timedelta
-import hashlib
-import secrets
-import json
-from twilio.rest import Client
-import jwt
-from bson import ObjectId
+from passlib.context import CryptContext
+from jose import JWTError, jwt
+import redis
 
-# Load environment variables
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+# Import Mapbox service
+from mapbox_service import mapbox_service, RouteRequest, LocationUpdate, NavigationProgress, Coordinate
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# JWT Secret
-JWT_SECRET = "delivery_dispatch_secret_key_2024"
+# Environment variables
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://localhost:27017/")
+DB_NAME = os.getenv("DB_NAME", "delivery_dispatch")
+SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-this-in-production")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-# Twilio client (will be configured when credentials are provided)
-twilio_client = None
+# Initialize FastAPI app
+app = FastAPI(title="Delivery Driver Dispatch API", version="1.0.0")
 
-app = FastAPI(title="Delivery Dispatch API")
-api_router = APIRouter(prefix="/api")
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Security
 security = HTTPBearer()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# WebSocket connection manager
+# Database
+client = AsyncIOMotorClient(MONGO_URL)
+db = client[DB_NAME]
+
+# Redis for real-time data
+try:
+    redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True, socket_connect_timeout=1)
+    redis_client.ping()
+    logger.info("Redis connection established")
+except Exception as e:
+    logger.warning(f"Redis connection failed: {e}")
+    redis_client = None
+
+# WebSocket Connection Manager
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[str, WebSocket] = {}
         self.driver_connections: Dict[str, WebSocket] = {}
-        self.admin_connections: List[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket, client_type: str, client_id: str = None):
+        self.customer_connections: Dict[str, WebSocket] = {}
+
+    async def connect_driver(self, websocket: WebSocket, driver_id: str):
         await websocket.accept()
-        if client_type == "driver" and client_id:
-            self.driver_connections[client_id] = websocket
-        elif client_type == "admin":
-            self.admin_connections.append(websocket)
-        else:
-            connection_id = str(uuid.uuid4())
-            self.active_connections[connection_id] = websocket
-            return connection_id
-    
-    def disconnect(self, websocket: WebSocket, client_type: str = None, client_id: str = None):
-        if client_type == "driver" and client_id:
-            self.driver_connections.pop(client_id, None)
-        elif client_type == "admin":
-            if websocket in self.admin_connections:
-                self.admin_connections.remove(websocket)
-        else:
-            # Remove from active connections
-            for conn_id, conn in list(self.active_connections.items()):
-                if conn == websocket:
-                    self.active_connections.pop(conn_id, None)
-                    break
-    
-    async def send_to_driver(self, driver_id: str, message: dict):
+        self.driver_connections[driver_id] = websocket
+        logger.info(f"Driver {driver_id} connected")
+
+    async def connect_customer(self, websocket: WebSocket, tracking_id: str):
+        await websocket.accept()
+        self.customer_connections[tracking_id] = websocket
+        logger.info(f"Customer tracking {tracking_id} connected")
+
+    def disconnect_driver(self, driver_id: str):
         if driver_id in self.driver_connections:
-            await self.driver_connections[driver_id].send_text(json.dumps(message))
-    
-    async def send_to_admins(self, message: dict):
-        for connection in self.admin_connections[:]:
-            try:
-                await connection.send_text(json.dumps(message))
-            except:
-                self.admin_connections.remove(connection)
-    
-    async def send_to_trackers(self, delivery_id: str, message: dict):
-        # Send location updates to tracking clients
-        for conn_id, connection in list(self.active_connections.items()):
-            try:
-                await connection.send_text(json.dumps(message))
-            except:
-                self.active_connections.pop(conn_id, None)
+            del self.driver_connections[driver_id]
+            logger.info(f"Driver {driver_id} disconnected")
+
+    def disconnect_customer(self, tracking_id: str):
+        if tracking_id in self.customer_connections:
+            del self.customer_connections[tracking_id]
+            logger.info(f"Customer tracking {tracking_id} disconnected")
+
+    async def broadcast_to_customers(self, driver_id: str, location_data: dict):
+        # Find deliveries for this driver
+        active_deliveries = await db.deliveries.find({"driver_id": driver_id, "status": {"$in": ["assigned", "picked_up", "in_transit"]}}).to_list(None)
+        
+        for delivery in active_deliveries:
+            tracking_id = delivery.get("tracking_id")
+            if tracking_id and tracking_id in self.customer_connections:
+                try:
+                    await self.customer_connections[tracking_id].send_text(json.dumps({
+                        "type": "location_update",
+                        "driver_location": location_data,
+                        "delivery_id": str(delivery["_id"]),
+                        "estimated_arrival": delivery.get("estimated_arrival")
+                    }))
+                except Exception as e:
+                    logger.error(f"Error broadcasting to customer {tracking_id}: {e}")
+                    self.disconnect_customer(tracking_id)
 
 manager = ConnectionManager()
 
-# Models
-class User(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    email: str
+# Pydantic models
+class UserCreate(BaseModel):
+    email: EmailStr
+    password: str
     name: str
     phone: str
     role: str  # 'admin' or 'driver'
-    password_hash: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
 
-class UserCreate(BaseModel):
+class UserLogin(BaseModel):
+    email: EmailStr
+    password: str
+
+class User(BaseModel):
+    id: str
     email: str
     name: str
     phone: str
     role: str
-    password: str
-
-class UserLogin(BaseModel):
-    email: str
-    password: str
-
-class Delivery(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    customer_name: str
-    customer_phone: str
-    pickup_address: str
-    pickup_lat: Optional[float] = None
-    pickup_lng: Optional[float] = None
-    delivery_address: str
-    delivery_lat: Optional[float] = None
-    delivery_lng: Optional[float] = None
-    status: str = "created"  # created, assigned, in_progress, delivered, cancelled
-    driver_id: Optional[str] = None
-    tracking_token: str = Field(default_factory=lambda: secrets.token_urlsafe(32))
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    assigned_at: Optional[datetime] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
-    notes: Optional[str] = None
 
 class DeliveryCreate(BaseModel):
+    pickup_address: Optional[str] = None
+    pickup_latitude: Optional[float] = None
+    pickup_longitude: Optional[float] = None
+    delivery_address: Optional[str] = None
+    delivery_latitude: Optional[float] = None
+    delivery_longitude: Optional[float] = None
     customer_name: str
     customer_phone: str
-    pickup_address: str
-    delivery_address: str
+    customer_email: EmailStr
     notes: Optional[str] = None
+
+class DeliveryAssign(BaseModel):
+    driver_id: str
 
 class DeliveryUpdate(BaseModel):
-    status: Optional[str] = None
-    notes: Optional[str] = None
+    status: str  # 'assigned', 'picked_up', 'in_transit', 'delivered'
 
-class LocationUpdate(BaseModel):
-    delivery_id: str
-    lat: float
-    lng: float
-    heading: Optional[float] = None
-    speed: Optional[float] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+class TrackingLinkCreate(BaseModel):
+    customer_email: EmailStr
 
-class SMSRequest(BaseModel):
-    phone_number: str
-    message: str
+# Utility functions
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
-# Helper functions
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
+def get_password_hash(password):
+    return pwd_context.hash(password)
 
-def verify_password(password: str, hashed: str) -> bool:
-    return hashlib.sha256(password.encode()).hexdigest() == hashed
-
-def create_jwt_token(user_id: str, role: str) -> str:
-    payload = {
-        "user_id": user_id,
-        "role": role,
-        "exp": datetime.utcnow() + timedelta(days=7)
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
     try:
-        payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=["HS256"])
-        user_id = payload.get("user_id")
-        role = payload.get("role")
-        
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token")
-        
-        user = await db.users.find_one({"id": user_id})
-        if not user:
-            raise HTTPException(status_code=401, detail="User not found")
-        
-        return {"id": user_id, "role": role, "email": user["email"], "name": user["name"]}
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    user = await db.users.find_one({"_id": user_id})
+    if user is None:
+        raise credentials_exception
+    return user
 
-def require_admin(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return current_user
+def generate_tracking_id(delivery_id: str, customer_email: str) -> str:
+    """Generate a secure tracking ID"""
+    salt = secrets.token_hex(16)
+    data = f"{delivery_id}:{customer_email}:{salt}:{datetime.utcnow().timestamp()}"
+    tracking_hash = hashlib.sha256(data.encode()).hexdigest()
+    return tracking_hash[:16]
 
-def require_driver(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] != "driver":
-        raise HTTPException(status_code=403, detail="Driver access required")
-    return current_user
+# API Routes
+
+@app.get("/")
+async def root():
+    return {"message": "Delivery Driver Dispatch API", "version": "1.0.0"}
+
+@app.get("/api/health")
+async def health():
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
 # Authentication endpoints
-@api_router.post("/auth/register")
+@app.post("/api/auth/register")
 async def register(user: UserCreate):
     # Check if user exists
     existing_user = await db.users.find_one({"email": user.email})
@@ -206,385 +209,546 @@ async def register(user: UserCreate):
         raise HTTPException(status_code=400, detail="Email already registered")
     
     # Create user
-    user_dict = user.dict()
-    user_dict["password_hash"] = hash_password(user_dict.pop("password"))
-    user_obj = User(**user_dict)
+    user_id = str(uuid.uuid4())
+    hashed_password = get_password_hash(user.password)
     
-    await db.users.insert_one(user_obj.dict())
+    user_doc = {
+        "_id": user_id,
+        "email": user.email,
+        "password": hashed_password,
+        "name": user.name,
+        "phone": user.phone,
+        "role": user.role,
+        "created_at": datetime.utcnow(),
+        "is_active": True
+    }
     
-    # Create JWT token
-    token = create_jwt_token(user_obj.id, user_obj.role)
+    await db.users.insert_one(user_doc)
+    
+    # Create access token
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user_id, "email": user.email, "role": user.role},
+        expires_delta=access_token_expires
+    )
     
     return {
-        "token": token,
+        "token": access_token,
         "user": {
-            "id": user_obj.id,
-            "email": user_obj.email,
-            "name": user_obj.name,
-            "role": user_obj.role
+            "id": user_id,
+            "email": user.email,
+            "name": user.name,
+            "phone": user.phone,
+            "role": user.role
         }
     }
 
-@api_router.post("/auth/login")
+@app.post("/api/auth/login")
 async def login(user: UserLogin):
-    # Find user
     db_user = await db.users.find_one({"email": user.email})
-    if not db_user:
+    if not db_user or not verify_password(user.password, db_user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Verify password
-    if not verify_password(user.password, db_user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    if not db_user.get("is_active", True):
+        raise HTTPException(status_code=401, detail="Account is disabled")
     
-    # Create JWT token
-    token = create_jwt_token(db_user["id"], db_user["role"])
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": db_user["_id"], "email": db_user["email"], "role": db_user["role"]},
+        expires_delta=access_token_expires
+    )
     
     return {
-        "token": token,
+        "token": access_token,
         "user": {
-            "id": db_user["id"],
+            "id": db_user["_id"],
             "email": db_user["email"],
             "name": db_user["name"],
+            "phone": db_user["phone"],
             "role": db_user["role"]
         }
     }
 
-# Delivery endpoints
-@api_router.post("/deliveries", response_model=Delivery)
-async def create_delivery(delivery: DeliveryCreate, admin: dict = Depends(require_admin)):
-    delivery_dict = delivery.dict()
-    delivery_obj = Delivery(**delivery_dict)
-    
-    await db.deliveries.insert_one(delivery_obj.dict())
-    
-    # Notify all admins about new delivery
-    await manager.send_to_admins({
-        "type": "new_delivery",
-        "delivery": delivery_obj.dict()
-    })
-    
-    return delivery_obj
-
-@api_router.get("/deliveries", response_model=List[Delivery])
-async def get_deliveries(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] == "admin":
-        # Admins see all deliveries
-        deliveries = await db.deliveries.find().sort("created_at", -1).to_list(1000)
-    else:
-        # Drivers see only their assigned deliveries
-        deliveries = await db.deliveries.find({"driver_id": current_user["id"]}).sort("created_at", -1).to_list(1000)
-    
-    return [Delivery(**delivery) for delivery in deliveries]
-
-@api_router.get("/deliveries/{delivery_id}")
-async def get_delivery(delivery_id: str, current_user: dict = Depends(get_current_user)):
-    delivery = await db.deliveries.find_one({"id": delivery_id})
-    if not delivery:
-        raise HTTPException(status_code=404, detail="Delivery not found")
-    
-    # Check permissions
-    if current_user["role"] == "driver" and delivery["driver_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    return Delivery(**delivery)
-
-@api_router.put("/deliveries/{delivery_id}/assign/{driver_id}")
-async def assign_delivery(delivery_id: str, driver_id: str, admin: dict = Depends(require_admin)):
-    # Check if driver exists
-    driver = await db.users.find_one({"id": driver_id, "role": "driver"})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    # Update delivery
-    result = await db.deliveries.update_one(
-        {"id": delivery_id},
-        {
-            "$set": {
-                "driver_id": driver_id,
-                "status": "assigned",
-                "assigned_at": datetime.utcnow()
-            }
-        }
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Delivery not found")
-    
-    # Get updated delivery
-    delivery = await db.deliveries.find_one({"id": delivery_id})
-    
-    # Notify driver about new assignment
-    await manager.send_to_driver(driver_id, {
-        "type": "delivery_assigned",
-        "delivery": delivery
-    })
-    
-    # Notify admins about assignment
-    await manager.send_to_admins({
-        "type": "delivery_assigned",
-        "delivery": delivery,
-        "driver": driver
-    })
-    
-    return {"message": "Delivery assigned successfully"}
-
-@api_router.put("/deliveries/{delivery_id}/status")
-async def update_delivery_status(delivery_id: str, update: DeliveryUpdate, current_user: dict = Depends(get_current_user)):
-    delivery = await db.deliveries.find_one({"id": delivery_id})
-    if not delivery:
-        raise HTTPException(status_code=404, detail="Delivery not found")
-    
-    # Check permissions
-    if current_user["role"] == "driver" and delivery["driver_id"] != current_user["id"]:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    update_data = {}
-    if update.status:
-        update_data["status"] = update.status
-        
-        if update.status == "in_progress":
-            update_data["started_at"] = datetime.utcnow()
-            # Send SMS to customer when delivery starts
-            if delivery.get("customer_phone"):
-                await send_tracking_sms(delivery["customer_phone"], delivery["tracking_token"])
-        elif update.status == "delivered":
-            update_data["completed_at"] = datetime.utcnow()
-    
-    if update.notes:
-        update_data["notes"] = update.notes
-    
-    if update_data:
-        await db.deliveries.update_one({"id": delivery_id}, {"$set": update_data})
-        
-        # Get updated delivery
-        updated_delivery = await db.deliveries.find_one({"id": delivery_id})
-        
-        # Notify admins about status change
-        await manager.send_to_admins({
-            "type": "delivery_updated",
-            "delivery": updated_delivery
-        })
-        
-        # If status changed to in_progress, notify tracking clients
-        if update.status == "in_progress":
-            await manager.send_to_trackers(delivery_id, {
-                "type": "delivery_started",
-                "delivery_id": delivery_id
-            })
-    
-    return {"message": "Delivery updated successfully"}
-
-# Driver endpoints
-@api_router.get("/drivers")
-async def get_drivers(admin: dict = Depends(require_admin)):
-    drivers = await db.users.find({"role": "driver"}).to_list(1000)
-    return [{"id": driver["id"], "name": driver["name"], "email": driver["email"], "phone": driver["phone"]} for driver in drivers]
-
-# Location tracking
-@api_router.post("/locations")
-async def update_location(location: LocationUpdate, driver: dict = Depends(require_driver)):
-    # Store location in database
-    location_data = location.dict()
-    location_data["driver_id"] = driver["id"]
-    await db.locations.insert_one(location_data)
-    
-    # Broadcast location to tracking clients and admins
-    await manager.send_to_trackers(location.delivery_id, {
-        "type": "location_update",
-        "delivery_id": location.delivery_id,
-        "lat": location.lat,
-        "lng": location.lng,
-        "heading": location.heading,
-        "speed": location.speed,
-        "timestamp": location.timestamp.isoformat()
-    })
-    
-    # Also notify admins
-    await manager.send_to_admins({
-        "type": "location_update",
-        "delivery_id": location.delivery_id,
-        "driver_id": driver["id"],
-        "lat": location.lat,
-        "lng": location.lng,
-        "heading": location.heading,
-        "speed": location.speed,
-        "timestamp": location.timestamp.isoformat()
-    })
-    
-    return {"message": "Location updated"}
-
-# Public tracking endpoint (no auth required)
-@api_router.get("/track/{tracking_token}")
-async def get_tracking_info(tracking_token: str):
-    delivery = await db.deliveries.find_one({"tracking_token": tracking_token})
-    if not delivery:
-        raise HTTPException(status_code=404, detail="Tracking information not found")
-    
-    # Get latest location if delivery is in progress
-    location = None
-    if delivery["status"] == "in_progress" and delivery.get("driver_id"):
-        location = await db.locations.find_one(
-            {"delivery_id": delivery["id"]},
-            sort=[("timestamp", -1)]
-        )
-    
-    return {
-        "delivery": {
-            "id": delivery["id"],
-            "customer_name": delivery["customer_name"],
-            "pickup_address": delivery["pickup_address"],
-            "delivery_address": delivery["delivery_address"],
-            "status": delivery["status"],
-            "created_at": delivery["created_at"],
-            "started_at": delivery.get("started_at"),
-            "completed_at": delivery.get("completed_at")
-        },
-        "location": location
-    }
-
-# SMS Integration
-async def send_tracking_sms(phone_number: str, tracking_token: str):
-    global twilio_client
-    if not twilio_client:
-        return False
-    
+# Mapbox and Route endpoints
+@app.post("/api/route/calculate")
+async def calculate_route(route_request: RouteRequest, current_user: dict = Depends(get_current_user)):
+    """Calculate a route between origin and destination"""
     try:
-        tracking_url = f"https://yourapp.com/track/{tracking_token}"  # Replace with actual domain
-        message = f"Your delivery is on the way! Track your driver here: {tracking_url}"
-        
-        twilio_client.messages.create(
-            body=message,
-            from_="+1234567890",  # Replace with actual Twilio number
-            to=phone_number
-        )
-        return True
+        route_response = await mapbox_service.calculate_route(route_request)
+        return route_response.dict()
     except Exception as e:
-        print(f"SMS sending failed: {e}")
-        return False
+        raise HTTPException(status_code=500, detail=f"Route calculation error: {str(e)}")
 
-@api_router.post("/sms/send")
-async def send_sms(sms: SMSRequest, admin: dict = Depends(require_admin)):
-    global twilio_client
-    if not twilio_client:
-        raise HTTPException(status_code=400, detail="SMS service not configured")
-    
+@app.post("/api/route/optimize")
+async def optimize_route(coordinates: List[dict], profile: str = "mapbox/driving-traffic", current_user: dict = Depends(get_current_user)):
+    """Optimize a multi-stop route"""
     try:
-        twilio_client.messages.create(
-            body=sms.message,
-            from_="+1234567890",  # Replace with actual Twilio number
-            to=sms.phone_number
-        )
-        return {"message": "SMS sent successfully"}
+        coords = [Coordinate(**coord) for coord in coordinates]
+        route_response = await mapbox_service.optimize_multi_stop_route(coords, profile)
+        return route_response.dict()
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"SMS sending failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Route optimization error: {str(e)}")
 
-# Configuration endpoint for Twilio
-@api_router.post("/config/twilio")
-async def configure_twilio(config: dict, admin: dict = Depends(require_admin)):
-    global twilio_client
+@app.post("/api/geocode")
+async def geocode_address(address: str, current_user: dict = Depends(get_current_user)):
+    """Convert address to coordinates"""
     try:
-        account_sid = config.get("account_sid")
-        auth_token = config.get("auth_token")
-        
-        if account_sid and auth_token:
-            twilio_client = Client(account_sid, auth_token)
-            return {"message": "Twilio configured successfully"}
+        coordinate = await mapbox_service.geocode_address(address)
+        if coordinate:
+            return {"success": True, "coordinate": coordinate.dict()}
         else:
-            raise HTTPException(status_code=400, detail="Missing Twilio credentials")
+            return {"success": False, "error": "Address not found"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Twilio configuration failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Geocoding error: {str(e)}")
+
+@app.post("/api/reverse-geocode")
+async def reverse_geocode(coordinate: dict, current_user: dict = Depends(get_current_user)):
+    """Convert coordinates to address"""
+    try:
+        coord = Coordinate(**coordinate)
+        address = await mapbox_service.reverse_geocode(coord)
+        if address:
+            return {"success": True, "address": address}
+        else:
+            return {"success": False, "error": "Address not found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reverse geocoding error: {str(e)}")
+
+# Delivery endpoints
+@app.post("/api/deliveries")
+async def create_delivery(delivery: DeliveryCreate, current_user: dict = Depends(get_current_user)):
+    """Create a new delivery"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create deliveries")
+    
+    try:
+        # Geocode addresses if coordinates not provided
+        pickup_lat, pickup_lng = delivery.pickup_latitude, delivery.pickup_longitude
+        delivery_lat, delivery_lng = delivery.delivery_latitude, delivery.delivery_longitude
+        
+        if delivery.pickup_address and (not pickup_lat or not pickup_lng):
+            pickup_coord = await mapbox_service.geocode_address(delivery.pickup_address)
+            if pickup_coord:
+                pickup_lat, pickup_lng = pickup_coord.latitude, pickup_coord.longitude
+        
+        if delivery.delivery_address and (not delivery_lat or not delivery_lng):
+            delivery_coord = await mapbox_service.geocode_address(delivery.delivery_address)
+            if delivery_coord:
+                delivery_lat, delivery_lng = delivery_coord.latitude, delivery_coord.longitude
+        
+        if not all([pickup_lat, pickup_lng, delivery_lat, delivery_lng]):
+            raise HTTPException(status_code=400, detail="Unable to resolve pickup or delivery location")
+        
+        delivery_id = str(uuid.uuid4())
+        delivery_doc = {
+            "_id": delivery_id,
+            "pickup_address": delivery.pickup_address,
+            "pickup_latitude": pickup_lat,
+            "pickup_longitude": pickup_lng,
+            "delivery_address": delivery.delivery_address,
+            "delivery_latitude": delivery_lat,
+            "delivery_longitude": delivery_lng,
+            "customer_name": delivery.customer_name,
+            "customer_phone": delivery.customer_phone,
+            "customer_email": delivery.customer_email,
+            "notes": delivery.notes,
+            "status": "pending",
+            "created_by": current_user["_id"],
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        
+        await db.deliveries.insert_one(delivery_doc)
+        
+        return {
+            "delivery_id": delivery_id,
+            "message": "Delivery created successfully",
+            "pickup_coordinates": {"latitude": pickup_lat, "longitude": pickup_lng},
+            "delivery_coordinates": {"latitude": delivery_lat, "longitude": delivery_lng}
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating delivery: {str(e)}")
+
+@app.get("/api/deliveries")
+async def get_deliveries(current_user: dict = Depends(get_current_user)):
+    """Get deliveries based on user role"""
+    try:
+        if current_user["role"] == "admin":
+            # Admin sees all deliveries
+            deliveries = await db.deliveries.find().sort([("created_at", -1)]).to_list(None)
+        elif current_user["role"] == "driver":
+            # Driver sees only assigned deliveries
+            deliveries = await db.deliveries.find({"driver_id": current_user["_id"]}).sort([("created_at", -1)]).to_list(None)
+        else:
+            raise HTTPException(status_code=403, detail="Invalid user role")
+        
+        # Convert ObjectId to string for JSON serialization
+        for delivery in deliveries:
+            delivery["id"] = str(delivery["_id"])
+            del delivery["_id"]
+        
+        return {"deliveries": deliveries}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching deliveries: {str(e)}")
+
+@app.get("/api/deliveries/{delivery_id}")
+async def get_delivery(delivery_id: str, current_user: dict = Depends(get_current_user)):
+    """Get specific delivery details"""
+    try:
+        delivery = await db.deliveries.find_one({"_id": delivery_id})
+        if not delivery:
+            raise HTTPException(status_code=404, detail="Delivery not found")
+        
+        # Check authorization
+        if current_user["role"] == "driver" and delivery.get("driver_id") != current_user["_id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        delivery["id"] = str(delivery["_id"])
+        del delivery["_id"]
+        
+        return delivery
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching delivery: {str(e)}")
+
+@app.post("/api/deliveries/{delivery_id}/assign")
+async def assign_delivery(delivery_id: str, assignment: DeliveryAssign, current_user: dict = Depends(get_current_user)):
+    """Assign delivery to a driver"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can assign deliveries")
+    
+    try:
+        # Check if driver exists
+        driver = await db.users.find_one({"_id": assignment.driver_id, "role": "driver"})
+        if not driver:
+            raise HTTPException(status_code=404, detail="Driver not found")
+        
+        # Update delivery
+        result = await db.deliveries.update_one(
+            {"_id": delivery_id},
+            {
+                "$set": {
+                    "driver_id": assignment.driver_id,
+                    "driver_name": driver["name"],
+                    "status": "assigned",
+                    "assigned_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Delivery not found")
+        
+        return {"message": "Delivery assigned successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error assigning delivery: {str(e)}")
+
+@app.put("/api/deliveries/{delivery_id}/status")
+async def update_delivery_status(delivery_id: str, status_update: DeliveryUpdate, current_user: dict = Depends(get_current_user)):
+    """Update delivery status"""
+    try:
+        delivery = await db.deliveries.find_one({"_id": delivery_id})
+        if not delivery:
+            raise HTTPException(status_code=404, detail="Delivery not found")
+        
+        # Check authorization
+        if current_user["role"] == "driver" and delivery.get("driver_id") != current_user["_id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        elif current_user["role"] not in ["admin", "driver"]:
+            raise HTTPException(status_code=403, detail="Invalid user role")
+        
+        update_data = {
+            "status": status_update.status,
+            "updated_at": datetime.utcnow()
+        }
+        
+        # Add timestamp for specific status changes
+        if status_update.status == "picked_up":
+            update_data["picked_up_at"] = datetime.utcnow()
+        elif status_update.status == "in_transit":
+            update_data["in_transit_at"] = datetime.utcnow()
+        elif status_update.status == "delivered":
+            update_data["delivered_at"] = datetime.utcnow()
+        
+        await db.deliveries.update_one({"_id": delivery_id}, {"$set": update_data})
+        
+        return {"message": "Delivery status updated successfully"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating delivery status: {str(e)}")
+
+# Tracking endpoints
+@app.post("/api/deliveries/{delivery_id}/tracking")
+async def create_tracking_link(delivery_id: str, tracking_request: TrackingLinkCreate, current_user: dict = Depends(get_current_user)):
+    """Create a customer tracking link"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create tracking links")
+    
+    try:
+        delivery = await db.deliveries.find_one({"_id": delivery_id})
+        if not delivery:
+            raise HTTPException(status_code=404, detail="Delivery not found")
+        
+        tracking_id = generate_tracking_id(delivery_id, tracking_request.customer_email)
+        
+        # Update delivery with tracking ID
+        await db.deliveries.update_one(
+            {"_id": delivery_id},
+            {
+                "$set": {
+                    "tracking_id": tracking_id,
+                    "tracking_created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        # Store tracking metadata in Redis if available
+        if redis_client:
+            tracking_metadata = {
+                "delivery_id": delivery_id,
+                "customer_email": tracking_request.customer_email,
+                "created_at": datetime.utcnow().isoformat(),
+                "expires_at": (datetime.utcnow() + timedelta(days=7)).isoformat()
+            }
+            redis_client.setex(f"tracking_meta:{tracking_id}", 604800, json.dumps(tracking_metadata))
+        
+        tracking_url = f"/track/{tracking_id}"
+        return {
+            "success": True,
+            "tracking_id": tracking_id,
+            "tracking_url": tracking_url
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error creating tracking link: {str(e)}")
+
+@app.get("/api/track/{tracking_id}")
+async def get_tracking_info(tracking_id: str):
+    """Get tracking information (public endpoint)"""
+    try:
+        # Find delivery by tracking ID
+        delivery = await db.deliveries.find_one({"tracking_id": tracking_id})
+        if not delivery:
+            raise HTTPException(status_code=404, detail="Tracking link not found")
+        
+        # Get current driver location if available
+        driver_location = None
+        navigation_progress = None
+        
+        if delivery.get("driver_id"):
+            driver_location = await mapbox_service.get_driver_location(delivery["driver_id"])
+            navigation_progress = await mapbox_service.get_navigation_progress(str(delivery["_id"]))
+        
+        return {
+            "delivery_id": str(delivery["_id"]),
+            "status": delivery["status"],
+            "pickup_location": {
+                "address": delivery.get("pickup_address"),
+                "latitude": delivery["pickup_latitude"],
+                "longitude": delivery["pickup_longitude"]
+            },
+            "delivery_location": {
+                "address": delivery.get("delivery_address"),
+                "latitude": delivery["delivery_latitude"],
+                "longitude": delivery["delivery_longitude"]
+            },
+            "estimated_arrival": delivery.get("estimated_arrival").isoformat() if delivery.get("estimated_arrival") else None,
+            "driver_location": driver_location,
+            "navigation_progress": navigation_progress,
+            "created_at": delivery["created_at"].isoformat(),
+            "updated_at": delivery["updated_at"].isoformat()
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting tracking info: {str(e)}")
+
+# Driver location and navigation endpoints
+@app.get("/api/driver/{driver_id}/location")
+async def get_driver_location(driver_id: str, current_user: dict = Depends(get_current_user)):
+    """Get current driver location"""
+    try:
+        location = await mapbox_service.get_driver_location(driver_id)
+        if location:
+            return {"success": True, "location": location}
+        else:
+            return {"success": False, "error": "Driver location not found"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting driver location: {str(e)}")
+
+@app.post("/api/delivery/{delivery_id}/navigation/start")
+async def start_navigation(delivery_id: str, route_data: dict, current_user: dict = Depends(get_current_user)):
+    """Start navigation for a delivery"""
+    try:
+        delivery = await db.deliveries.find_one({"_id": delivery_id})
+        if not delivery:
+            raise HTTPException(status_code=404, detail="Delivery not found")
+        
+        # Check authorization
+        if current_user["role"] == "driver" and delivery.get("driver_id") != current_user["_id"]:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Update delivery status
+        await db.deliveries.update_one(
+            {"_id": delivery_id},
+            {
+                "$set": {
+                    "status": "in_transit",
+                    "navigation_started_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        # Store route data in Redis if available
+        if redis_client:
+            redis_client.setex(f"navigation_route:{delivery_id}", 3600, json.dumps(route_data))
+        
+        return {"success": True, "message": "Navigation started"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error starting navigation: {str(e)}")
+
+@app.post("/api/delivery/{delivery_id}/progress")
+async def update_navigation_progress(delivery_id: str, progress_data: dict, current_user: dict = Depends(get_current_user)):
+    """Update navigation progress"""
+    try:
+        progress = NavigationProgress(delivery_id=delivery_id, **progress_data)
+        success = await mapbox_service.store_navigation_progress(progress)
+        
+        if success:
+            # Update ETA in database
+            new_eta = datetime.utcnow() + timedelta(seconds=progress.duration_remaining)
+            await db.deliveries.update_one(
+                {"_id": delivery_id},
+                {
+                    "$set": {
+                        "estimated_arrival": new_eta,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            
+            return {"success": True, "message": "Progress updated"}
+        else:
+            return {"success": False, "error": "Failed to update progress"}
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error updating progress: {str(e)}")
+
+@app.post("/api/delivery/{delivery_id}/complete")
+async def complete_delivery(delivery_id: str, current_user: dict = Depends(get_current_user)):
+    """Mark delivery as completed"""
+    try:
+        # Update delivery status
+        await db.deliveries.update_one(
+            {"_id": delivery_id},
+            {
+                "$set": {
+                    "status": "delivered",
+                    "delivered_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        # Clean up Redis data
+        if redis_client:
+            redis_client.delete(f"navigation_route:{delivery_id}")
+            redis_client.delete(f"navigation_progress:{delivery_id}")
+        
+        return {"success": True, "message": "Delivery completed"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error completing delivery: {str(e)}")
 
 # WebSocket endpoints
-@api_router.websocket("/ws/driver/{driver_id}")
+@app.websocket("/ws/driver/{driver_id}")
 async def driver_websocket(websocket: WebSocket, driver_id: str):
-    await manager.connect(websocket, "driver", driver_id)
+    await manager.connect_driver(websocket, driver_id)
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
+            location_data = json.loads(data)
             
-            if message.get("type") == "location_update":
-                # Handle real-time location updates
-                location = LocationUpdate(**message["data"])
-                location_data = location.dict()
-                location_data["driver_id"] = driver_id
-                await db.locations.insert_one(location_data)
+            # Create location update object
+            location_update = LocationUpdate(
+                driver_id=driver_id,
+                **location_data
+            )
+            
+            # Store location update
+            success = await mapbox_service.store_location_update(location_update)
+            
+            if success:
+                # Broadcast to customers tracking this driver
+                await manager.broadcast_to_customers(driver_id, location_data)
                 
-                # Broadcast to tracking clients and admins
-                await manager.send_to_trackers(location.delivery_id, {
-                    "type": "location_update",
-                    "delivery_id": location.delivery_id,
-                    "lat": location.lat,
-                    "lng": location.lng,
-                    "heading": location.heading,
-                    "speed": location.speed,
-                    "timestamp": location.timestamp.isoformat()
-                })
+                # Send acknowledgment back to driver
+                await websocket.send_text(json.dumps({
+                    "type": "location_ack",
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "status": "processed"
+                }))
+            else:
+                await websocket.send_text(json.dumps({
+                    "type": "location_error",
+                    "message": "Failed to process location update"
+                }))
                 
-                await manager.send_to_admins({
-                    "type": "location_update",
-                    "delivery_id": location.delivery_id,
-                    "driver_id": driver_id,
-                    "lat": location.lat,
-                    "lng": location.lng,
-                    "heading": location.heading,
-                    "speed": location.speed,
-                    "timestamp": location.timestamp.isoformat()
-                })
-    
     except WebSocketDisconnect:
-        manager.disconnect(websocket, "driver", driver_id)
+        manager.disconnect_driver(driver_id)
 
-@api_router.websocket("/ws/admin")
-async def admin_websocket(websocket: WebSocket):
-    await manager.connect(websocket, "admin")
+@app.websocket("/ws/customer/{tracking_id}")
+async def customer_websocket(websocket: WebSocket, tracking_id: str):
+    await manager.connect_customer(websocket, tracking_id)
     try:
+        # Send initial tracking data
+        delivery = await db.deliveries.find_one({"tracking_id": tracking_id})
+        if delivery and delivery.get("driver_id"):
+            driver_location = await mapbox_service.get_driver_location(delivery["driver_id"])
+            navigation_progress = await mapbox_service.get_navigation_progress(str(delivery["_id"]))
+            
+            if driver_location or navigation_progress:
+                await websocket.send_text(json.dumps({
+                    "type": "initial_data",
+                    "driver_location": driver_location,
+                    "navigation_progress": navigation_progress,
+                    "delivery_status": delivery["status"]
+                }))
+        
+        # Keep connection alive
         while True:
-            data = await websocket.receive_text()
-            # Handle admin WebSocket messages if needed
+            await websocket.receive_text()
+            
     except WebSocketDisconnect:
-        manager.disconnect(websocket, "admin")
+        manager.disconnect_customer(tracking_id)
 
-@api_router.websocket("/ws/track/{tracking_token}")
-async def tracking_websocket(websocket: WebSocket, tracking_token: str):
-    # Verify tracking token
-    delivery = await db.deliveries.find_one({"tracking_token": tracking_token})
-    if not delivery:
-        await websocket.close(code=4004, reason="Invalid tracking token")
-        return
+# Driver management endpoints
+@app.get("/api/drivers")
+async def get_drivers(current_user: dict = Depends(get_current_user)):
+    """Get list of drivers (admin only)"""
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can access driver list")
     
-    connection_id = await manager.connect(websocket, "tracking")
     try:
-        while True:
-            data = await websocket.receive_text()
-            # Handle tracking WebSocket messages if needed
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        drivers = await db.users.find({"role": "driver", "is_active": True}).to_list(None)
+        
+        # Remove sensitive information and convert ObjectId
+        for driver in drivers:
+            driver["id"] = str(driver["_id"])
+            del driver["_id"]
+            del driver["password"]
+        
+        return {"drivers": drivers}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching drivers: {str(e)}")
 
-# Include the router
-app.include_router(api_router)
-
-# CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
-
-# Health check
-@api_router.get("/health")
-async def health_check():
-    return {"status": "healthy", "service": "delivery-dispatch-api"}
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
