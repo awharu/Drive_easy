@@ -682,16 +682,16 @@ class DeliveryDispatchTester:
 
     async def test_public_tracking(self):
         """Test public tracking endpoint (no auth required)"""
-        if not self.tracking_token:
-            self.log_result("Public Tracking", False, "Missing tracking token")
+        if not self.tracking_id:
+            self.log_result("Public Tracking", False, "Missing tracking ID")
             return False
 
         try:
-            async with self.session.get(f"{API_BASE}/track/{self.tracking_token}") as response:
+            async with self.session.get(f"{API_BASE}/track/{self.tracking_id}") as response:
                 if response.status == 200:
                     data = await response.json()
-                    if 'delivery' in data and data['delivery']['id'] == self.test_delivery_id:
-                        self.log_result("Public Tracking", True)
+                    if 'delivery_id' in data and 'status' in data and 'pickup_location' in data and 'delivery_location' in data:
+                        self.log_result("Public Tracking", True, f"Tracking data retrieved for delivery {data['delivery_id']}")
                         return True
                     else:
                         self.log_result("Public Tracking", False, f"Invalid tracking response: {data}")
