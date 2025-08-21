@@ -273,17 +273,17 @@ class DeliveryDispatchTester:
             async with self.session.get(f"{API_BASE}/drivers", headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if isinstance(data, list) and len(data) > 0:
+                    if 'drivers' in data and isinstance(data['drivers'], list) and len(data['drivers']) > 0:
                         # Should find our registered driver
-                        driver_found = any(driver['email'] == 'driver@deliveryapp.com' for driver in data)
+                        driver_found = any(driver['email'] == 'driver@deliveryapp.com' for driver in data['drivers'])
                         if driver_found:
-                            self.log_result("Driver Listing", True, f"Found {len(data)} drivers")
+                            self.log_result("Driver Listing", True, f"Found {len(data['drivers'])} drivers")
                             return True
                         else:
                             self.log_result("Driver Listing", False, f"Registered driver not found in list: {data}")
                             return False
                     else:
-                        self.log_result("Driver Listing", False, f"Expected list with drivers, got: {data}")
+                        self.log_result("Driver Listing", False, f"Expected drivers list, got: {data}")
                         return False
                 else:
                     error_data = await response.text()
