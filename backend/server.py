@@ -290,9 +290,13 @@ async def optimize_route(coordinates: List[dict], profile: str = "mapbox/driving
         raise HTTPException(status_code=500, detail=f"Route optimization error: {str(e)}")
 
 @app.post("/api/geocode")
-async def geocode_address(address: str, current_user: dict = Depends(get_current_user)):
+async def geocode_address(request: dict, current_user: dict = Depends(get_current_user)):
     """Convert address to coordinates"""
     try:
+        address = request.get("address")
+        if not address:
+            raise HTTPException(status_code=400, detail="Address is required")
+            
         coordinate = await mapbox_service.geocode_address(address)
         if coordinate:
             return {"success": True, "coordinate": coordinate.dict()}
