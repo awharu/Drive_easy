@@ -37,7 +37,7 @@ class DeliveryDispatchTester:
         self.admin_user = None
         self.driver_user = None
         self.test_delivery_id = None
-        self.tracking_token = None
+        self.tracking_id = None
         self.results = {
             'passed': 0,
             'failed': 0,
