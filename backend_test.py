@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend Testing for Delivery Dispatch App
+Comprehensive Backend Testing for Delivery Dispatch App with Mapbox Integration
 Tests all key backend functionality including authentication, delivery management,
-driver management, status updates, location tracking, and WebSocket connections.
+driver management, status updates, location tracking, WebSocket connections,
+and new Mapbox features: route calculation, geocoding, real-time tracking.
 """
 
 import asyncio
@@ -20,6 +21,13 @@ load_dotenv('/app/frontend/.env')
 # Get the backend URL from frontend env
 BACKEND_URL = os.getenv('EXPO_PUBLIC_API_URL', 'http://localhost:8001')
 API_BASE = f"{BACKEND_URL}/api"
+
+# Test coordinates (San Francisco area)
+SF_COORDINATES = {
+    "pickup": {"latitude": 37.7749, "longitude": -122.4194},  # San Francisco downtown
+    "delivery": {"latitude": 37.7849, "longitude": -122.4094},  # North Beach area
+    "waypoint": {"latitude": 37.7849, "longitude": -122.4294}   # Golden Gate Park area
+}
 
 class DeliveryDispatchTester:
     def __init__(self):
