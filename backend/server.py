@@ -246,7 +246,11 @@ async def register(user: UserCreate):
 @app.post("/api/auth/login")
 async def login(user: UserLogin):
     db_user = await db.users.find_one({"email": user.email})
-    if not db_user or not verify_password(user.password, db_user["password"]):
+    
+    # Handle both password field names for backward compatibility
+    stored_password = db_user.get("password") or db_user.get("password_hash") if db_user else None
+    
+    if not db_user or not stored_password or not verify_password(user.password, stored_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     
     if not db_user.get("is_active", True):
