@@ -110,8 +110,20 @@ const DriverDashboard: React.FC = () => {
       }
 
       setUser(parsedUser);
-      await loadDeliveries();
-      await connectWebSocket(parsedUser.id);
+      
+      // Progressive loading - do these operations after user state is set
+      setTimeout(async () => {
+        await loadDeliveries();
+        // Request location permissions after deliveries are loaded
+        setTimeout(() => {
+          requestLocationPermissions();
+        }, 500);
+        // Connect WebSocket last
+        setTimeout(() => {
+          connectWebSocket(parsedUser.id);
+        }, 1000);
+      }, 100);
+      
     } catch (error) {
       console.error('Auth check error:', error);
       router.replace('/');
