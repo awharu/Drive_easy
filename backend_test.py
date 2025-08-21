@@ -231,10 +231,10 @@ class DeliveryDispatchTester:
             async with self.session.get(f"{API_BASE}/deliveries", headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if isinstance(data, list) and len(data) > 0:
-                        self.log_result("Admin Delivery Listing", True, f"Found {len(data)} deliveries")
+                    if 'deliveries' in data and isinstance(data['deliveries'], list) and len(data['deliveries']) > 0:
+                        self.log_result("Admin Delivery Listing", True, f"Found {len(data['deliveries'])} deliveries")
                     else:
-                        self.log_result("Admin Delivery Listing", False, f"Expected list with deliveries, got: {data}")
+                        self.log_result("Admin Delivery Listing", False, f"Expected deliveries list, got: {data}")
                         return False
                 else:
                     error_data = await response.text()
@@ -251,11 +251,11 @@ class DeliveryDispatchTester:
             async with self.session.get(f"{API_BASE}/deliveries", headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if isinstance(data, list):
-                        self.log_result("Driver Delivery Listing", True, f"Driver sees {len(data)} assigned deliveries")
+                    if 'deliveries' in data and isinstance(data['deliveries'], list):
+                        self.log_result("Driver Delivery Listing", True, f"Driver sees {len(data['deliveries'])} assigned deliveries")
                         return True
                     else:
-                        self.log_result("Driver Delivery Listing", False, f"Expected list, got: {data}")
+                        self.log_result("Driver Delivery Listing", False, f"Expected deliveries list, got: {data}")
                         return False
                 else:
                     error_data = await response.text()
