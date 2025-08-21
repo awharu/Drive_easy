@@ -190,9 +190,9 @@ const DriverDashboard: React.FC = () => {
     try {
       locationSubscription.current = await Location.watchPositionAsync(
         {
-          accuracy: Location.Accuracy.High,
-          timeInterval: 5000, // Update every 5 seconds
-          distanceInterval: 10, // Update if moved 10 meters
+          accuracy: Location.Accuracy.Balanced, // Use balanced for better performance
+          timeInterval: 10000, // Update every 10 seconds (less frequent)
+          distanceInterval: 20, // Update if moved 20 meters (less sensitive)
         },
         (location) => {
           const newLocation = {
@@ -205,12 +205,16 @@ const DriverDashboard: React.FC = () => {
 
           setUserLocation(newLocation);
 
-          // Send location update via WebSocket
+          // Send location update via WebSocket (throttled)
           if (websocket && websocket.readyState === WebSocket.OPEN) {
-            websocket.send(JSON.stringify({
-              ...newLocation,
-              timestamp: new Date().toISOString(),
-            }));
+            try {
+              websocket.send(JSON.stringify({
+                ...newLocation,
+                timestamp: new Date().toISOString(),
+              }));
+            } catch (wsError) {
+              console.error('WebSocket send error:', wsError);
+            }
           }
         }
       );
