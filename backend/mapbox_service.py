@@ -93,18 +93,39 @@ class MapboxService:
     async def calculate_route(self, route_request: RouteRequest) -> RouteResponse:
         """Calculate a route between origin and destination with optional waypoints"""
         try:
-            # Build coordinates list
-            coordinates = [[route_request.origin.longitude, route_request.origin.latitude]]
+            # Build GeoJSON features list
+            features = []
+            
+            # Add origin
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [route_request.origin.longitude, route_request.origin.latitude]
+                }
+            })
             
             # Add waypoints if provided
             for waypoint in route_request.waypoints:
-                coordinates.append([waypoint.longitude, waypoint.latitude])
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [waypoint.longitude, waypoint.latitude]
+                    }
+                })
             
             # Add destination
-            coordinates.append([route_request.destination.longitude, route_request.destination.latitude])
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [route_request.destination.longitude, route_request.destination.latitude]
+                }
+            })
             
             # Check cache first
-            cache_key = f"route:{hash(str(coordinates))}:{route_request.profile}"
+            cache_key = f"route:{hash(str(features))}:{route_request.profile}"
             if self.redis:
                 cached_route = self.redis.get(cache_key)
                 if cached_route:
@@ -113,11 +134,9 @@ class MapboxService:
             
             # Make API request
             response = self.directions.directions(
-                coordinates=coordinates,
+                features=features,
                 profile=route_request.profile,
                 steps=route_request.steps,
-                voice_instructions=route_request.voice_instructions,
-                banner_instructions=route_request.banner_instructions,
                 alternatives=route_request.alternatives,
                 overview=route_request.overview,
                 geometries='geojson'
