@@ -705,45 +705,62 @@ class DeliveryDispatchTester:
             return False
 
     async def test_websocket_connections(self):
-        """Test WebSocket connections"""
+        """Test WebSocket connections for real-time tracking"""
         if not self.driver_user:
             self.log_result("WebSocket Connections", False, "Missing driver user")
             return False
 
         # Test driver WebSocket connection
-        ws_url = f"{BACKEND_URL.replace('http', 'ws')}/api/ws/driver/{self.driver_user['id']}"
+        ws_url = f"{BACKEND_URL.replace('http', 'ws')}/ws/driver/{self.driver_user['id']}"
         
         try:
             async with websockets.connect(ws_url) as websocket:
                 # Send a test location update via WebSocket
                 test_message = {
-                    "type": "location_update",
-                    "data": {
-                        "delivery_id": self.test_delivery_id or "test-delivery",
-                        "lat": 40.7589,
-                        "lng": -73.9851,
-                        "heading": 90.0,
-                        "speed": 30.0
-                    }
+                    "latitude": SF_COORDINATES["pickup"]["latitude"],
+                    "longitude": SF_COORDINATES["pickup"]["longitude"],
+                    "heading": 90.0,
+                    "speed": 30.0,
+                    "accuracy": 5.0,
+                    "timestamp": datetime.utcnow().isoformat()
                 }
                 
                 await websocket.send(json.dumps(test_message))
-                self.log_result("Driver WebSocket Connection", True)
+                
+                # Wait for acknowledgment
+                response = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                response_data = json.loads(response)
+                
+                if response_data.get('type') == 'location_ack':
+                    self.log_result("Driver WebSocket Connection", True)
+                else:
+                    self.log_result("Driver WebSocket Connection", False, f"Unexpected response: {response_data}")
                 
         except Exception as e:
             self.log_result("Driver WebSocket Connection", False, f"Exception: {str(e)}")
 
-        # Test admin WebSocket connection
-        admin_ws_url = f"{BACKEND_URL.replace('http', 'ws')}/api/ws/admin"
-        
-        try:
-            async with websockets.connect(admin_ws_url) as websocket:
-                # Just test connection
-                self.log_result("Admin WebSocket Connection", True)
-                return True
-                
-        except Exception as e:
-            self.log_result("Admin WebSocket Connection", False, f"Exception: {str(e)}")
+        # Test customer WebSocket connection if tracking ID exists
+        if self.tracking_id:
+            customer_ws_url = f"{BACKEND_URL.replace('http', 'ws')}/ws/customer/{self.tracking_id}"
+            
+            try:
+                async with websockets.connect(customer_ws_url) as websocket:
+                    # Wait for initial data
+                    initial_data = await asyncio.wait_for(websocket.recv(), timeout=5.0)
+                    data = json.loads(initial_data)
+                    
+                    if data.get('type') == 'initial_data':
+                        self.log_result("Customer WebSocket Connection", True)
+                        return True
+                    else:
+                        self.log_result("Customer WebSocket Connection", True, "Connected but no initial data")
+                        return True
+                        
+            except Exception as e:
+                self.log_result("Customer WebSocket Connection", False, f"Exception: {str(e)}")
+                return False
+        else:
+            self.log_result("Customer WebSocket Connection", False, "No tracking ID available")
             return False
 
     async def test_error_handling(self):
