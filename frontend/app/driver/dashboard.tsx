@@ -908,10 +908,32 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f3f4f6',
+    padding: 20,
   },
   mapPlaceholderText: {
-    fontSize: 16,
+    fontSize: 24,
     color: '#6b7280',
+    marginBottom: 20,
+  },
+  mapInfo: {
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+    width: '100%',
+    maxWidth: 400,
+  },
+  mapInfoText: {
+    fontSize: 14,
+    color: '#374151',
+    marginBottom: 8,
+  },
+  mapNoteText: {
+    fontSize: 12,
+    color: '#9ca3af',
+    textAlign: 'center',
+    lineHeight: 16,
+    maxWidth: 300,
   },
   userLocationMarker: {
     width: 20,
