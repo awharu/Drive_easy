@@ -329,11 +329,8 @@ class DeliveryDispatchTester:
 
         headers = {"Authorization": f"Bearer {self.driver_token}"}
         
-        # Test status update to in_progress
-        status_update = {
-            "status": "in_progress",
-            "notes": "Started delivery - on the way to pickup"
-        }
+        # Test status update to picked_up
+        status_update = {"status": "picked_up"}
         
         try:
             url = f"{API_BASE}/deliveries/{self.test_delivery_id}/status"
@@ -341,23 +338,20 @@ class DeliveryDispatchTester:
                 if response.status == 200:
                     data = await response.json()
                     if 'message' in data:
-                        self.log_result("Status Update (In Progress)", True)
+                        self.log_result("Status Update (Picked Up)", True)
                     else:
-                        self.log_result("Status Update (In Progress)", False, f"Unexpected response: {data}")
+                        self.log_result("Status Update (Picked Up)", False, f"Unexpected response: {data}")
                         return False
                 else:
                     error_data = await response.text()
-                    self.log_result("Status Update (In Progress)", False, f"Status: {response.status}, Response: {error_data}")
+                    self.log_result("Status Update (Picked Up)", False, f"Status: {response.status}, Response: {error_data}")
                     return False
         except Exception as e:
-            self.log_result("Status Update (In Progress)", False, f"Exception: {str(e)}")
+            self.log_result("Status Update (Picked Up)", False, f"Exception: {str(e)}")
             return False
 
-        # Test status update to delivered
-        status_update = {
-            "status": "delivered",
-            "notes": "Package delivered successfully"
-        }
+        # Test status update to in_transit
+        status_update = {"status": "in_transit"}
         
         try:
             url = f"{API_BASE}/deliveries/{self.test_delivery_id}/status"
@@ -365,17 +359,17 @@ class DeliveryDispatchTester:
                 if response.status == 200:
                     data = await response.json()
                     if 'message' in data:
-                        self.log_result("Status Update (Delivered)", True)
+                        self.log_result("Status Update (In Transit)", True)
                         return True
                     else:
-                        self.log_result("Status Update (Delivered)", False, f"Unexpected response: {data}")
+                        self.log_result("Status Update (In Transit)", False, f"Unexpected response: {data}")
                         return False
                 else:
                     error_data = await response.text()
-                    self.log_result("Status Update (Delivered)", False, f"Status: {response.status}, Response: {error_data}")
+                    self.log_result("Status Update (In Transit)", False, f"Status: {response.status}, Response: {error_data}")
                     return False
         except Exception as e:
-            self.log_result("Status Update (Delivered)", False, f"Exception: {str(e)}")
+            self.log_result("Status Update (In Transit)", False, f"Exception: {str(e)}")
             return False
 
     async def test_location_updates(self):
