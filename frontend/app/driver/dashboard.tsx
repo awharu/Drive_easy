@@ -743,6 +743,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6b7280',
   },
+  loadingSubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#9ca3af',
+    textAlign: 'center',
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
