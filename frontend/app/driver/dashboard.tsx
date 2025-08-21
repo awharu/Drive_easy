@@ -15,6 +15,7 @@ import {
 import { router, useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+import axios from 'axios';
 // Temporarily comment out Mapbox import to fix loading issues
 // import Mapbox from '@rnmapbox/maps';
 
