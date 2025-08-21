@@ -258,14 +258,14 @@ async def login(user: UserLogin):
     
     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": db_user["_id"], "email": db_user["email"], "role": db_user["role"]},
+        data={"sub": str(db_user["_id"]), "email": db_user["email"], "role": db_user["role"]},
         expires_delta=access_token_expires
     )
     
     return {
         "token": access_token,
         "user": {
-            "id": db_user["_id"],
+            "id": str(db_user["_id"]),
             "email": db_user["email"],
             "name": db_user["name"],
             "phone": db_user["phone"],
