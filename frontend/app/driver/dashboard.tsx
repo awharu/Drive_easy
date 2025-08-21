@@ -234,11 +234,25 @@ const DriverDashboard: React.FC = () => {
   };
 
   const connectWebSocket = async (driverId: string) => {
+    // Skip WebSocket connection if already connected
+    if (websocket && websocket.readyState === WebSocket.OPEN) {
+      return;
+    }
+
     try {
       const wsUrl = `${API_BASE_URL.replace('https://', 'wss://').replace('http://', 'ws://')}/ws/driver/${driverId}`;
       const ws = new WebSocket(wsUrl);
 
+      // Set timeout for connection
+      const connectionTimeout = setTimeout(() => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.close();
+          console.log('WebSocket connection timeout');
+        }
+      }, 10000); // 10 second timeout
+
       ws.onopen = () => {
+        clearTimeout(connectionTimeout);
         console.log('WebSocket connected');
         setWebsocket(ws);
       };
@@ -261,18 +275,21 @@ const DriverDashboard: React.FC = () => {
       };
 
       ws.onclose = () => {
+        clearTimeout(connectionTimeout);
         console.log('WebSocket disconnected');
         setWebsocket(null);
-        // Attempt to reconnect after 5 seconds
+        // Attempt to reconnect after 10 seconds (less aggressive)
         setTimeout(() => {
           if (user) {
             connectWebSocket(user.id);
           }
-        }, 5000);
+        }, 10000);
       };
 
       ws.onerror = (error) => {
+        clearTimeout(connectionTimeout);
         console.error('WebSocket error:', error);
+        setWebsocket(null);
       };
 
     } catch (error) {
