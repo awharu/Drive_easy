@@ -19,27 +19,35 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://dispatch-fleet.
 
 // Custom Button component that works on web
 const CustomButton = ({ onPress, disabled, style, textStyle, children, accessibilityLabel }) => {
-  const buttonStyle = {
-    ...style,
-    border: 'none',
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    display: 'flex',
-    justifyContent: 'center',
-    alignItems: 'center',
-    fontFamily: 'inherit',
-    backgroundColor: style?.backgroundColor || 'transparent',
-  };
-
   if (Platform.OS === 'web') {
     return (
       <button
         onClick={onPress}
         disabled={disabled}
-        style={buttonStyle}
+        style={{
+          backgroundColor: style?.backgroundColor || '#2563eb',
+          paddingTop: style?.paddingVertical || 16,
+          paddingBottom: style?.paddingVertical || 16,
+          paddingLeft: style?.paddingHorizontal || 16,
+          paddingRight: style?.paddingHorizontal || 16,
+          borderRadius: style?.borderRadius || 8,
+          border: 'none',
+          cursor: disabled ? 'not-allowed' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          fontFamily: 'inherit',
+          marginBottom: style?.marginBottom || 0,
+          width: '100%',
+        }}
         aria-label={accessibilityLabel}
       >
-        <span style={textStyle}>{children}</span>
+        <span style={{
+          color: textStyle?.color || '#fff',
+          fontSize: textStyle?.fontSize || 18,
+          fontWeight: textStyle?.fontWeight || '600',
+        }}>{children}</span>
       </button>
     );
   }
