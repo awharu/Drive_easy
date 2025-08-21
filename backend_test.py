@@ -875,7 +875,7 @@ async def main():
     success = await tester.run_all_tests()
     
     if success:
-        print("\n🎉 All tests passed! Backend is working correctly.")
+        print("\n🎉 All tests passed! Backend with Mapbox integration is working correctly.")
         return 0
     else:
         print("\n⚠️  Some tests failed. Check the errors above.")
