@@ -406,6 +406,280 @@ class DeliveryDispatchTester:
             self.log_result("Location Updates", False, f"Exception: {str(e)}")
             return False
 
+    # ========== NEW MAPBOX INTEGRATION TESTS ==========
+
+    async def test_route_calculation(self):
+        """Test route calculation between coordinates"""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        route_data = {
+            "origin": SF_COORDINATES["pickup"],
+            "destination": SF_COORDINATES["delivery"],
+            "profile": "mapbox/driving-traffic",
+            "steps": True,
+            "alternatives": True
+        }
+        
+        try:
+            async with self.session.post(f"{API_BASE}/route/calculate", json=route_data, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success') and 'route' in data and 'duration' in data and 'distance' in data:
+                        self.log_result("Route Calculation", True, f"Route: {data['distance']:.0f}m, {data['duration']:.0f}s")
+                        return True
+                    else:
+                        self.log_result("Route Calculation", False, f"Invalid route response: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Route Calculation", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Route Calculation", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_route_optimization(self):
+        """Test multi-stop route optimization"""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        coordinates = [
+            SF_COORDINATES["pickup"],
+            SF_COORDINATES["waypoint"],
+            SF_COORDINATES["delivery"]
+        ]
+        
+        try:
+            async with self.session.post(f"{API_BASE}/route/optimize", 
+                                       json={"coordinates": coordinates, "profile": "mapbox/driving-traffic"}, 
+                                       headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success') and 'route' in data:
+                        self.log_result("Route Optimization", True, f"Optimized route calculated")
+                        return True
+                    else:
+                        self.log_result("Route Optimization", False, f"Invalid optimization response: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Route Optimization", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Route Optimization", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_geocoding(self):
+        """Test address to coordinates conversion"""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        test_address = "Union Square, San Francisco, CA"
+        
+        try:
+            async with self.session.post(f"{API_BASE}/geocode", 
+                                       json={"address": test_address}, 
+                                       headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success') and 'coordinate' in data:
+                        coord = data['coordinate']
+                        if 'latitude' in coord and 'longitude' in coord:
+                            self.log_result("Geocoding", True, f"Address geocoded to {coord['latitude']:.4f}, {coord['longitude']:.4f}")
+                            return True
+                        else:
+                            self.log_result("Geocoding", False, f"Invalid coordinate format: {coord}")
+                            return False
+                    else:
+                        self.log_result("Geocoding", False, f"Geocoding failed: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Geocoding", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Geocoding", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_reverse_geocoding(self):
+        """Test coordinates to address conversion"""
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        coordinate = SF_COORDINATES["pickup"]
+        
+        try:
+            async with self.session.post(f"{API_BASE}/reverse-geocode", 
+                                       json={"coordinate": coordinate}, 
+                                       headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success') and 'address' in data:
+                        self.log_result("Reverse Geocoding", True, f"Coordinates converted to: {data['address'][:50]}...")
+                        return True
+                    else:
+                        self.log_result("Reverse Geocoding", False, f"Reverse geocoding failed: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Reverse Geocoding", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Reverse Geocoding", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_navigation_start(self):
+        """Test starting navigation for a delivery"""
+        if not self.test_delivery_id:
+            self.log_result("Navigation Start", False, "Missing delivery ID")
+            return False
+
+        headers = {"Authorization": f"Bearer {self.driver_token}"}
+        
+        route_data = {
+            "route_id": "test-route-123",
+            "estimated_duration": 1800,  # 30 minutes
+            "estimated_distance": 5000   # 5km
+        }
+        
+        try:
+            url = f"{API_BASE}/delivery/{self.test_delivery_id}/navigation/start"
+            async with self.session.post(url, json=route_data, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success'):
+                        self.log_result("Navigation Start", True)
+                        return True
+                    else:
+                        self.log_result("Navigation Start", False, f"Navigation start failed: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Navigation Start", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Navigation Start", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_navigation_progress(self):
+        """Test updating navigation progress"""
+        if not self.test_delivery_id:
+            self.log_result("Navigation Progress", False, "Missing delivery ID")
+            return False
+
+        headers = {"Authorization": f"Bearer {self.driver_token}"}
+        
+        progress_data = {
+            "distance_remaining": 2500,
+            "duration_remaining": 900,
+            "fraction_traveled": 0.5,
+            "distance_traveled": 2500,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            url = f"{API_BASE}/delivery/{self.test_delivery_id}/progress"
+            async with self.session.post(url, json=progress_data, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success'):
+                        self.log_result("Navigation Progress", True)
+                        return True
+                    else:
+                        self.log_result("Navigation Progress", False, f"Progress update failed: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Navigation Progress", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Navigation Progress", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_delivery_completion(self):
+        """Test completing a delivery"""
+        if not self.test_delivery_id:
+            self.log_result("Delivery Completion", False, "Missing delivery ID")
+            return False
+
+        headers = {"Authorization": f"Bearer {self.driver_token}"}
+        
+        try:
+            url = f"{API_BASE}/delivery/{self.test_delivery_id}/complete"
+            async with self.session.post(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success'):
+                        self.log_result("Delivery Completion", True)
+                        return True
+                    else:
+                        self.log_result("Delivery Completion", False, f"Completion failed: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Delivery Completion", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Delivery Completion", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_driver_location_retrieval(self):
+        """Test getting driver location"""
+        if not self.driver_user:
+            self.log_result("Driver Location Retrieval", False, "Missing driver user")
+            return False
+
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        try:
+            url = f"{API_BASE}/driver/{self.driver_user['id']}/location"
+            async with self.session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Location might not exist yet, so success=false is acceptable
+                    if 'success' in data:
+                        self.log_result("Driver Location Retrieval", True, f"Location status: {data['success']}")
+                        return True
+                    else:
+                        self.log_result("Driver Location Retrieval", False, f"Invalid response: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Driver Location Retrieval", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Driver Location Retrieval", False, f"Exception: {str(e)}")
+            return False
+
+    async def test_tracking_link_creation(self):
+        """Test creating customer tracking links"""
+        if not self.test_delivery_id:
+            self.log_result("Tracking Link Creation", False, "Missing delivery ID")
+            return False
+
+        headers = {"Authorization": f"Bearer {self.admin_token}"}
+        
+        tracking_data = {
+            "customer_email": "sarah.johnson@example.com"
+        }
+        
+        try:
+            url = f"{API_BASE}/deliveries/{self.test_delivery_id}/tracking"
+            async with self.session.post(url, json=tracking_data, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get('success') and 'tracking_id' in data and 'tracking_url' in data:
+                        self.tracking_id = data['tracking_id']
+                        self.log_result("Tracking Link Creation", True, f"Tracking ID: {self.tracking_id}")
+                        return True
+                    else:
+                        self.log_result("Tracking Link Creation", False, f"Invalid tracking response: {data}")
+                        return False
+                else:
+                    error_data = await response.text()
+                    self.log_result("Tracking Link Creation", False, f"Status: {response.status}, Response: {error_data}")
+                    return False
+        except Exception as e:
+            self.log_result("Tracking Link Creation", False, f"Exception: {str(e)}")
+            return False
+
     async def test_public_tracking(self):
         """Test public tracking endpoint (no auth required)"""
         if not self.tracking_token:
