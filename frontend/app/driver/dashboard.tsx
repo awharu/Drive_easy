@@ -15,17 +15,17 @@ import {
 import { router, useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
-import Mapbox from '@rnmapbox/maps';
-import axios from 'axios';
+// Temporarily comment out Mapbox import to fix loading issues
+// import Mapbox from '@rnmapbox/maps';
 
 // Get the API base URL from environment
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://dispatch-fleet.preview.emergentagent.com';
 const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
-// Set Mapbox access token
-if (MAPBOX_ACCESS_TOKEN) {
-  Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
-}
+// Temporarily disable Mapbox initialization
+// if (MAPBOX_ACCESS_TOKEN) {
+//   Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
+// }
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
