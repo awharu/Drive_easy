@@ -590,68 +590,25 @@ const DriverDashboard: React.FC = () => {
           )}
         </View>
 
-        {MAPBOX_ACCESS_TOKEN && selectedDelivery ? (
-          <Mapbox.MapView
-            ref={mapRef}
-            style={styles.map}
-            styleURL={Mapbox.StyleURL.Street}
-            zoomEnabled={true}
-            scrollEnabled={true}
-            pitchEnabled={true}
-            rotateEnabled={true}
-          >
-            <Mapbox.Camera
-              ref={cameraRef}
-              zoomLevel={14}
-              centerCoordinate={
-                userLocation
-                  ? [userLocation.longitude, userLocation.latitude]
-                  : [-122.4194, 37.7749]
-              }
-              animationMode="flyTo"
-              animationDuration={1000}
-            />
-
-            {userLocation && (
-              <Mapbox.PointAnnotation
-                id="userLocation"
-                coordinate={[userLocation.longitude, userLocation.latitude]}
-              >
-                <View style={styles.userLocationMarker}>
-                  <View style={styles.userLocationDot} />
-                </View>
-              </Mapbox.PointAnnotation>
-            )}
-
-            {selectedDelivery.pickup_latitude && selectedDelivery.pickup_longitude && (
-              <Mapbox.PointAnnotation
-                id="pickupLocation"
-                coordinate={[selectedDelivery.pickup_longitude, selectedDelivery.pickup_latitude]}
-              >
-                <View style={styles.pickupMarker}>
-                  <Text style={styles.markerText}>P</Text>
-                </View>
-              </Mapbox.PointAnnotation>
-            )}
-
-            {selectedDelivery.delivery_latitude && selectedDelivery.delivery_longitude && (
-              <Mapbox.PointAnnotation
-                id="deliveryLocation"
-                coordinate={[selectedDelivery.delivery_longitude, selectedDelivery.delivery_latitude]}
-              >
-                <View style={styles.deliveryMarker}>
-                  <Text style={styles.markerText}>D</Text>
-                </View>
-              </Mapbox.PointAnnotation>
-            )}
-          </Mapbox.MapView>
-        ) : (
-          <View style={styles.mapPlaceholder}>
-            <Text style={styles.mapPlaceholderText}>
-              {!MAPBOX_ACCESS_TOKEN ? 'Map unavailable - Mapbox token missing' : 'Loading map...'}
-            </Text>
-          </View>
-        )}
+        {/* Temporary placeholder for map - Mapbox integration disabled for performance */}
+        <View style={styles.mapPlaceholder}>
+          <Text style={styles.mapPlaceholderText}>🗺️ Map View</Text>
+          {selectedDelivery && (
+            <View style={styles.mapInfo}>
+              <Text style={styles.mapInfoText}>📍 Pickup: {selectedDelivery.pickup_address}</Text>
+              <Text style={styles.mapInfoText}>🎯 Delivery: {selectedDelivery.delivery_address}</Text>
+              {userLocation && (
+                <Text style={styles.mapInfoText}>
+                  📱 Your Location: {userLocation.latitude.toFixed(4)}, {userLocation.longitude.toFixed(4)}
+                </Text>
+              )}
+            </View>
+          )}
+          <Text style={styles.mapNoteText}>
+            Full Mapbox integration temporarily disabled for performance optimization.
+            Location tracking and navigation features are still functional.
+          </Text>
+        </View>
       </View>
     </Modal>
   );
