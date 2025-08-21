@@ -280,9 +280,12 @@ async def calculate_route(route_request: RouteRequest, current_user: dict = Depe
         raise HTTPException(status_code=500, detail=f"Route calculation error: {str(e)}")
 
 @app.post("/api/route/optimize")
-async def optimize_route(coordinates: List[dict], profile: str = "mapbox/driving-traffic", current_user: dict = Depends(get_current_user)):
+async def optimize_route(request: dict, current_user: dict = Depends(get_current_user)):
     """Optimize a multi-stop route"""
     try:
+        coordinates = request.get("coordinates", [])
+        profile = request.get("profile", "mapbox/driving-traffic")
+        
         coords = [Coordinate(**coord) for coord in coordinates]
         route_response = await mapbox_service.optimize_multi_stop_route(coords, profile)
         return route_response.dict()
