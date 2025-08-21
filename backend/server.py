@@ -306,10 +306,14 @@ async def geocode_address(request: dict, current_user: dict = Depends(get_curren
         raise HTTPException(status_code=500, detail=f"Geocoding error: {str(e)}")
 
 @app.post("/api/reverse-geocode")
-async def reverse_geocode(coordinate: dict, current_user: dict = Depends(get_current_user)):
+async def reverse_geocode(request: dict, current_user: dict = Depends(get_current_user)):
     """Convert coordinates to address"""
     try:
-        coord = Coordinate(**coordinate)
+        coordinate_data = request.get("coordinate")
+        if not coordinate_data:
+            raise HTTPException(status_code=400, detail="Coordinate is required")
+            
+        coord = Coordinate(**coordinate_data)
         address = await mapbox_service.reverse_geocode(coord)
         if address:
             return {"success": True, "address": address}
