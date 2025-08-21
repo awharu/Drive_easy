@@ -659,7 +659,18 @@ const DriverDashboard: React.FC = () => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2563eb" />
-        <Text style={styles.loadingText}>Loading deliveries...</Text>
+        <Text style={styles.loadingText}>Loading driver dashboard...</Text>
+        <Text style={styles.loadingSubtext}>Setting up location tracking and deliveries</Text>
+      </View>
+    );
+  }
+
+  // Show basic UI immediately when user is loaded, even if deliveries are still loading
+  if (!user) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2563eb" />
+        <Text style={styles.loadingText}>Checking authentication...</Text>
       </View>
     );
   }
