@@ -146,9 +146,14 @@ class DeliveryDispatchTester:
 
     async def test_user_login(self):
         """Test user login for both admin and driver"""
+        # Since we registered with unique emails, we need to use the same emails for login
+        if not self.admin_user or not self.driver_user:
+            self.log_result("User Login", False, "Registration must be completed first")
+            return False
+            
         # Test admin login
         admin_login = {
-            "email": "admin@deliveryapp.com",
+            "email": self.admin_user['email'],
             "password": "admin123"
         }
         
@@ -171,7 +176,7 @@ class DeliveryDispatchTester:
 
         # Test driver login
         driver_login = {
-            "email": "driver@deliveryapp.com",
+            "email": self.driver_user['email'],
             "password": "driver123"
         }
         
