@@ -191,13 +191,14 @@ class DeliveryDispatchTester:
             return False
 
     async def test_delivery_creation(self):
-        """Test delivery creation (admin only)"""
+        """Test delivery creation with automatic geocoding (admin only)"""
         delivery_data = {
-            "customer_name": "John Smith",
-            "customer_phone": "+1234567892",
-            "pickup_address": "123 Main St, New York, NY 10001",
-            "delivery_address": "456 Oak Ave, Brooklyn, NY 11201",
-            "notes": "Handle with care - fragile items"
+            "customer_name": "Sarah Johnson",
+            "customer_phone": "+1415555123",
+            "customer_email": "sarah.johnson@example.com",
+            "pickup_address": "Union Square, San Francisco, CA",
+            "delivery_address": "Fisherman's Wharf, San Francisco, CA",
+            "notes": "Handle with care - fragile electronics"
         }
         
         headers = {"Authorization": f"Bearer {self.admin_token}"}
@@ -206,20 +207,19 @@ class DeliveryDispatchTester:
             async with self.session.post(f"{API_BASE}/deliveries", json=delivery_data, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    if 'id' in data and 'tracking_token' in data:
-                        self.test_delivery_id = data['id']
-                        self.tracking_token = data['tracking_token']
-                        self.log_result("Delivery Creation", True)
+                    if 'delivery_id' in data and 'pickup_coordinates' in data and 'delivery_coordinates' in data:
+                        self.test_delivery_id = data['delivery_id']
+                        self.log_result("Delivery Creation with Geocoding", True, f"Created delivery with coordinates")
                         return True
                     else:
-                        self.log_result("Delivery Creation", False, f"Missing id or tracking_token: {data}")
+                        self.log_result("Delivery Creation with Geocoding", False, f"Missing required fields: {data}")
                         return False
                 else:
                     error_data = await response.text()
-                    self.log_result("Delivery Creation", False, f"Status: {response.status}, Response: {error_data}")
+                    self.log_result("Delivery Creation with Geocoding", False, f"Status: {response.status}, Response: {error_data}")
                     return False
         except Exception as e:
-            self.log_result("Delivery Creation", False, f"Exception: {str(e)}")
+            self.log_result("Delivery Creation with Geocoding", False, f"Exception: {str(e)}")
             return False
 
     async def test_delivery_listing(self):
