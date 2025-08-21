@@ -294,16 +294,17 @@ class DeliveryDispatchTester:
             return False
 
     async def test_delivery_assignment(self):
-        """Test delivery assignment to driver"""
+        """Test delivery assignment to driver with location support"""
         if not self.test_delivery_id or not self.driver_user:
             self.log_result("Delivery Assignment", False, "Missing delivery ID or driver user")
             return False
 
         headers = {"Authorization": f"Bearer {self.admin_token}"}
+        assignment_data = {"driver_id": self.driver_user['id']}
         
         try:
-            url = f"{API_BASE}/deliveries/{self.test_delivery_id}/assign/{self.driver_user['id']}"
-            async with self.session.put(url, headers=headers) as response:
+            url = f"{API_BASE}/deliveries/{self.test_delivery_id}/assign"
+            async with self.session.post(url, json=assignment_data, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
                     if 'message' in data:
